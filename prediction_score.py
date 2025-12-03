@@ -1,0 +1,27 @@
+from rna_secstruct import SecStruct
+from RNAFoldAssess.utils.secondary_structure_tools import SecondaryStructureTools
+
+
+"""
+Need to find these attributes:
+sequence_length
+gc_content
+sequence_entropy
+mfe
+ens_def
+longest_sequential_A
+longest_sequential_C
+longest_sequential_U
+longest_sequential_G
+longest_GC_helix
+GU_pairs
+rate_of_bps_predicted
+hairpin_count
+junction_count
+helix_count
+singlestrand_count
+mway_junction_count
+AU_pairs_in_helix_terminal_ends
+helices_with_reverse_complement
+hairpins_with_gt4_unpaired_nts
+"""
