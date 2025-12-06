@@ -34,12 +34,12 @@ def seperate_data(path, kind):
             print(f"{d[1]} found in both sets ({kind} data)")
             break
 
-    with open(f"seperated_eterna_data_{kind}_validation.csv", "w") as fh:
+    with open(f"{kind}_validation.csv", "w") as fh:
         fh.write(headers)
         for d in eterna_data:
             fh.write(",".join(d))
 
-    with open(f"seperated_all_data_{kind}.csv", "w") as fh:
+    with open(f"validation_seperated_data_{kind}.csv", "w") as fh:
         fh.write(headers)
         for d in new_data:
             fh.write(",".join(d))
