@@ -297,12 +297,27 @@ def predict_quality(attrs: Dict[str, float], bundle_path=BUNDLE_PATH) -> Dict[st
     t_low = b["thresholds"]["low"]; t_high = b["thresholds"]["high"]
 
     # align & impute with training means if missing
+
+    # row = pd.Series(attrs, dtype=float).reindex(feats)
+    # if row.isna().any():
+    #     means = pd.Series(scaler.mean_, index=feats)
+    #     row = row.fillna(means)
+
+    # X_new = scaler.transform(pd.DataFrame([row.values], columns=feats)).astype(np.float32)
+
     row = pd.Series(attrs, dtype=float).reindex(feats)
     if row.isna().any():
         means = pd.Series(scaler.mean_, index=feats)
         row = row.fillna(means)
 
-    X_new = scaler.transform(pd.DataFrame([row.values], columns=feats)).astype(np.float32)
+    if hasattr(scaler, "feature_names_in_"):  # scaler fit on a DataFrame (with names)
+        # Optional safety check: ensure same columns/order
+        assert list(feats) == list(scaler.feature_names_in_)
+        X_new = scaler.transform(pd.DataFrame([row.values], columns=feats)).astype(np.float32)
+    else:  # scaler fit on a NumPy array (no names)
+        X_new = scaler.transform(row.to_numpy(dtype=float).reshape(1, -1)).astype(np.float32)
+
+
     with torch.no_grad():
         prob = torch.sigmoid(model(torch.from_numpy(X_new))).numpy().ravel()[0].item()
 
