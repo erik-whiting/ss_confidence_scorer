@@ -24,7 +24,7 @@ class QualityScorer:
     """
     Usage:
         extractor = lambda seq, dotbr: {... feature dict matching training FEATURES ...}
-        scorer = QualityScorer("quality_model_bundle2.joblib", feature_extractor=extractor)
+        scorer = QualityScorer("quality_model_bundle3.joblib", feature_extractor=extractor)
         result = scorer.score(sequence, dot_bracket)
         print(result)  # {'prob_good': 0.83, 'decision': 'probably good', ...}
     """

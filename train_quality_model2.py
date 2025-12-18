@@ -47,7 +47,7 @@ FEATURES = [
     "helices_with_reverse_complement","hairpins_with_gt4_unpaired_nts",
 ]
 
-BUNDLE_PATH = "quality_model_bundle2.joblib"
+BUNDLE_PATH = "quality_model_bundle3.joblib"
 
 # --- training
 easy_training = pd.read_csv(EASY_CSV_TRAINING).assign(target=1)
@@ -93,6 +93,10 @@ BATCH_SIZE = 128
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 HIDDEN = (64, 32)
+DROPOUT = 0.3
+PATIENCE = 5        # epochs with no improvement before stopping
+MIN_DELTA = 1e-4    # require at least this much improvement to reset patience
+
 
 train_loader = DataLoader(RNADataset(Xtr, ytr), batch_size=BATCH_SIZE, shuffle=True)
 val_loader =   DataLoader(RNADataset(Xva, yva), batch_size=BATCH_SIZE, shuffle=False)
@@ -103,11 +107,17 @@ class MLP(nn.Module):
     def __init__(self, d):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(d, HIDDEN[0]), nn.ReLU(),
-            nn.Linear(HIDDEN[0], HIDDEN[1]), nn.ReLU(),
+            nn.Linear(d, HIDDEN[0]),
+            nn.ReLU(),
+            nn.Dropout(DROPOUT),
+            nn.Linear(HIDDEN[0], HIDDEN[1]),
+            nn.ReLU(),
+            nn.Dropout(DROPOUT),
             nn.Linear(HIDDEN[1], 1),
         )
-    def forward(self, x): return self.net(x).squeeze(1)  # logits
+
+    def forward(self, x):
+        return self.net(x).squeeze(1)  # logits
 
 
 model = MLP(Xtr.shape[1]).to(DEVICE)
@@ -131,12 +141,15 @@ def eval_probs(loader):
     return np.concatenate(outs).ravel(), np.concatenate(ys).ravel()
 
 
+best_state = None
+best_val_auc = -float("inf")
+epochs_no_improve = 0
 
-for epoch in range(1, EPOCHS+1):
+for epoch in range(1, EPOCHS + 1):
     model.train()
-    runloss=0.0
+    runloss = 0.0
 
-    for xb,yb in train_loader:
+    for xb, yb in train_loader:
         xb = xb.to(DEVICE)
         yb = yb.to(DEVICE)
         opt.zero_grad()
@@ -144,51 +157,79 @@ for epoch in range(1, EPOCHS+1):
         loss = loss_fn(logits, yb)
         loss.backward()
         opt.step()
-        runloss += loss.item()*len(xb)
+        runloss += loss.item() * len(xb)
 
     # validate
     pv, yv = eval_probs(val_loader)
-    val_auc = roc_auc_score(yv, pv) if len(np.unique(yv))>1 else float("nan")
+    val_auc = roc_auc_score(yv, pv) if len(np.unique(yv)) > 1 else float("nan")
 
-    if np.isfinite(val_auc) and val_auc > best_val_auc:
+    improved = np.isfinite(val_auc) and (val_auc > best_val_auc + MIN_DELTA)
+    if improved:
         best_val_auc = val_auc
-        best_state = {k: v.cpu().clone() for k,v in model.state_dict().items()}
+        best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+        epochs_no_improve = 0
+    else:
+        epochs_no_improve += 1
 
-    print(f"Epoch {epoch:03d}  loss={runloss/len(Xtr):.4f}  val_auc={val_auc:.4f}")
+    print(f"Epoch {epoch:03d}  loss={runloss/len(Xtr):.4f}  val_auc={val_auc:.4f}  no_improve={epochs_no_improve}")
+
+    if epochs_no_improve >= PATIENCE:
+        print(f"Early stopping at epoch {epoch} (best_val_auc={best_val_auc:.4f})")
+        break
 
 if best_state is not None:
     model.load_state_dict(best_state)
 
 
 # Picking the low/high cutoffs
-def choose_ternary_thresholds(y_true, y_prob, target_precision=0.9):
-    # low: prob < t_low --> "bad"
-    t_low = 0.2
-    for t in np.linspace(0.05, 0.5, 20):
-        pred_bad = (y_prob < t)
-        tp = np.sum(pred_bad & (y_true==0))
-        fp = np.sum(pred_bad & (y_true==1))
-        prec_bad = tp/(tp+fp) if (tp+fp)>0 else 0.0
-        if prec_bad >= target_precision:
-            t_low = float(t)
-            break
+def choose_ternary_thresholds(y_true, y_prob, prec_bad=0.95, prec_good=0.95, min_gap=0.10, grid=np.linspace(0.01, 0.99, 99)):
+    best = None  # (coverage, t_low, t_high)
 
-    # high: prob >= t_high --> "good"
-    t_high = 0.8
-    for t in np.linspace(0.5, 0.95, 20):
-        pred_good = (y_prob >= t)
-        tp = np.sum(pred_good & (y_true==1))
-        fp = np.sum(pred_good & (y_true==0))
-        prec_good = tp/(tp+fp) if (tp+fp)>0 else 0.0
-        if prec_good >= target_precision:
-            t_high = float(t)
-            break
+    for t_low in grid:
+        for t_high in grid:
+            if t_high < t_low + min_gap:
+                continue
+
+            bad = (y_prob < t_low)
+            good = (y_prob >= t_high)
+
+            # precision for "bad" bucket (true label 0)
+            tp_bad = np.sum(bad & (y_true == 0))
+            fp_bad = np.sum(bad & (y_true == 1))
+            p_bad = tp_bad / (tp_bad + fp_bad) if (tp_bad + fp_bad) else 0.0
+
+            # precision for "good" bucket (true label 1)
+            tp_good = np.sum(good & (y_true == 1))
+            fp_good = np.sum(good & (y_true == 0))
+            p_good = tp_good / (tp_good + fp_good) if (tp_good + fp_good) else 0.0
+
+            if p_bad >= prec_bad and p_good >= prec_good:
+                coverage = float((bad | good).mean())  # fraction NOT "can't tell"
+                if best is None or coverage > best[0]:
+                    best = (coverage, float(t_low), float(t_high))
+
+    if best is None:
+        # fallback if constraints are too strict
+        return 0.4, 0.6
+
+    _, t_low, t_high = best
     return t_low, t_high
 
+
 print(f"\n\nNow running validations to pick thresholds")
+
 pv, yv = eval_probs(val_loader)
-t_low, t_high = choose_ternary_thresholds(yv, pv, target_precision=0.9)
-print("Chosen thresholds:", t_low, t_high)
+t_low, t_high = choose_ternary_thresholds(yv, pv)
+
+bad_mask  = pv < t_low
+good_mask = pv >= t_high
+mid_mask  = ~(bad_mask | good_mask)
+
+print({
+    "val_bad_rate": float(bad_mask.mean()),
+    "val_mid_rate": float(mid_mask.mean()),
+    "val_good_rate": float(good_mask.mean()),
+})
 
 # more testing
 print(f"\n\nRunning tests with saved thresholds {t_low}, and {t_high}")
@@ -199,6 +240,12 @@ p,r,f1,_ = precision_recall_fscore_support(yt, yhat, average="binary", zero_divi
 auc = roc_auc_score(yt, pt) if len(np.unique(yt))>1 else float("nan")
 print({"test_auc": auc, "test_acc": acc, "test_precision": p, "test_recall": r, "test_f1": f1})
 
+bad = pt < t_low
+good = pt >= t_high
+mid = ~(bad | good)
+print({"test_bad_rate": float(bad.mean()), "test_mid_rate": float(mid.mean()), "test_good_rate": float(good.mean())})
+
+
 # Save
 bundle = {
     "meta": {"features": FEATURES, "created": time.strftime("%Y-%m-%d %H:%M:%S")},
@@ -206,9 +253,11 @@ bundle = {
     "model_state_dict": {k: v.cpu() for k,v in model.state_dict().items()},
     "model_class": "MLP",
     "model_kwargs": {"d": Xtr.shape[1]},
+    "arch": {"hidden": HIDDEN, "dropout": DROPOUT},
     "thresholds": {"low": t_low, "high": t_high},
     "metrics": {"val_auc": float(best_val_auc), "test_auc": float(auc)},
 }
+
 joblib.dump(bundle, BUNDLE_PATH)
 print(f"Saved to {BUNDLE_PATH}")
 

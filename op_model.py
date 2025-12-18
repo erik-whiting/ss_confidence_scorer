@@ -4,10 +4,12 @@ from collections import Counter
 import vienna
 from rna_secstruct import SecStruct
 from RNAFoldAssess.utils.secondary_structure_tools import SecondaryStructureTools
-from train_quality_model import predict_quality
+from quality_model_runtime import QualityScorer
 
 
 class RNAPrediction:
+    _scorer = None
+
     def __init__(self, sequence, prediction):
         self.sequence = sequence
         self.prediction = prediction
@@ -18,9 +20,11 @@ class RNAPrediction:
             self.motif_data.append(key)
 
     def get_confidence_score(self):
+        if RNAPrediction._scorer is None:
+            RNAPrediction._scorer = QualityScorer("quality_model_bundle_optuna_best.joblib")
+
         attrs = self.pred_attrs()
-        result = predict_quality(attrs, bundle_path="quality_model_bundle.joblib")
-        return result
+        return RNAPrediction._scorer.score_attrs(attrs)
 
 
     def pred_attrs(self):

@@ -1,0 +1,2 @@
+Model is wrong on easy data 2.497502% of the time
+Model is wrong on hard data 0.399600% of the time
