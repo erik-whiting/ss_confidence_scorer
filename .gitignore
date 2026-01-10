@@ -3,3 +3,4 @@ chem_map_all_easy_preds.csv
 chem_map_all_hard_preds.csv
 chem_map_easy_master_v*
 chem_map_hard_master_v*
+*.venv/*
