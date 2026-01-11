@@ -113,7 +113,15 @@ def objective(trial, args, Xtr, ytr, Xva, yva):
     weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True)
     dropout = trial.suggest_float("dropout", 0.0, 0.5)
 
-    hidden = trial.suggest_categorical("hidden", [[32, 16], [64, 32], [128, 64], [128, 32]])
+    hidden = trial.suggest_categorical("hidden", [
+        [16, 8],
+        [32, 16],
+        [64, 32],
+        [128, 64],
+        [256, 128],
+        [128, 16],   # bottleneck
+        [256, 32],   # stronger bottleneck
+    ])
     hidden = tuple(hidden)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128, 256])
 
