@@ -6,3 +6,4 @@ chem_map_hard_master_v*
 *.venv/*
 *err
 *out
+*.vscode/*
